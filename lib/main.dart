@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:apple_maps_flutter/apple_maps_flutter.dart';
 
 void main() {
@@ -33,6 +34,11 @@ class _MapScreenState extends State<MapScreen> {
   late AppleMapController mapController;
   int _selectedIndex = 0;
   final TextEditingController _searchController = TextEditingController();
+  Set<Annotation> _annotations = {};
+  bool _isSearching = false;
+
+  // Native MethodChannel for Apple MapKit Search
+  static const platform = MethodChannel('com.example.map/search');
 
   static const CameraPosition _kInitialPosition = CameraPosition(
     target: LatLng(35.681236, 139.767125),
@@ -43,13 +49,59 @@ class _MapScreenState extends State<MapScreen> {
     mapController = controller;
   }
 
-  void _handleSearch(String value) {
-    // 検索処理のシミュレーション
-    if (value.isNotEmpty) {
+  // Apple純正 (MapKit) の検索エンジンを呼び出す
+  Future<void> _handleSearch(String value) async {
+    if (value.isEmpty) return;
+
+    setState(() {
+      _isSearching = true;
+    });
+
+    try {
+      // Swift側を呼び出し、座標（緯度・経度）を受け取る
+      final dynamic result = await platform.invokeMethod('searchLocation', {"address": value});
+      
+      if (result != null) {
+        final double lat = result['lat'];
+        final double lng = result['lng'];
+        final String name = result['name'] ?? value;
+        final latLng = LatLng(lat, lng);
+
+        mapController.animateCamera(
+          CameraUpdate.newCameraPosition(
+            CameraPosition(target: latLng, zoom: 15),
+          ),
+        );
+
+        setState(() {
+          _annotations = {
+            Annotation(
+              annotationId: AnnotationId(value),
+              position: latLng,
+              infoWindow: InfoWindow(title: name),
+            ),
+          };
+        });
+      } else {
+        _showErrorSnackBar('「$value」が見つかりませんでした');
+      }
+    } on PlatformException catch (error) {
+      debugPrint('Native error: ${error.message}');
+      _showErrorSnackBar('検索中にエラーが発生しました');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSearching = false;
+        });
+      }
+    }
+  }
+
+  void _showErrorSnackBar(String message) {
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('「$value」を検索中...')),
+        SnackBar(content: Text(message)),
       );
-      // 本来はここでジオコーディング（住所から座標への変換）などを行います
     }
   }
 
@@ -64,7 +116,7 @@ class _MapScreenState extends State<MapScreen> {
             initialCameraPosition: _kInitialPosition,
             myLocationEnabled: true,
             myLocationButtonEnabled: false,
-            // 地図が表示されない場合、このウィジェットがiOS環境で実行されているか確認してください
+            annotations: _annotations,
           ),
 
           // Search Bar and Categories
@@ -78,7 +130,10 @@ class _MapScreenState extends State<MapScreen> {
             ),
           ),
 
-          // Right Side Buttons (Layers, Compass)
+          if (_isSearching)
+            const Center(child: CircularProgressIndicator()),
+
+          // Right Side Buttons
           Positioned(
             right: 12,
             top: MediaQuery.of(context).padding.top + 130,
@@ -137,7 +192,7 @@ class _MapScreenState extends State<MapScreen> {
           borderRadius: BorderRadius.circular(26),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.1),
+              color: Colors.black.withAlpha(25),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),
@@ -146,6 +201,7 @@ class _MapScreenState extends State<MapScreen> {
         child: TextField(
           controller: _searchController,
           onSubmitted: _handleSearch,
+          textInputAction: TextInputAction.search,
           decoration: InputDecoration(
             hintText: 'ここで検索',
             hintStyle: const TextStyle(color: Colors.grey, fontSize: 16),
@@ -156,8 +212,8 @@ class _MapScreenState extends State<MapScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.mic_none, color: Colors.grey),
-                    onPressed: () {},
+                    icon: const Icon(Icons.search, color: Colors.blue),
+                    onPressed: () => _handleSearch(_searchController.text),
                   ),
                   CircleAvatar(
                     radius: 16,
@@ -195,7 +251,10 @@ class _MapScreenState extends State<MapScreen> {
             child: ActionChip(
               avatar: Icon(categories[index]['icon'] as IconData, size: 16, color: Colors.black87),
               label: Text(categories[index]['label'] as String),
-              onPressed: () => _handleSearch(categories[index]['label'] as String),
+              onPressed: () {
+                _searchController.text = categories[index]['label'] as String;
+                _handleSearch(_searchController.text);
+              },
               backgroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(18),
@@ -218,7 +277,7 @@ class _MapScreenState extends State<MapScreen> {
         shape: BoxShape.circle,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
+            color: Colors.black.withAlpha(25),
             blurRadius: 4,
           ),
         ],
