@@ -10,7 +10,6 @@ import MapKit
   ) -> Bool {
     GeneratedPluginRegistrant.register(with: self)
     
-    // より確実なチャンネル登録方法（Registrarを使用）
     let registrar = self.registrar(forPlugin: "MapSearchPlugin")
     let searchChannel = FlutterMethodChannel(name: "com.example.map/search",
                                               binaryMessenger: registrar!.messenger())
@@ -43,10 +42,13 @@ import MapKit
       }
       
       let location = item.placemark.coordinate
+      // 住所や電話番号などの詳細情報を取得
       let dict: [String: Any] = [
         "lat": location.latitude,
         "lng": location.longitude,
-        "name": item.name ?? address
+        "name": item.name ?? address,
+        "address": item.placemark.title ?? "",
+        "phone": item.phoneNumber ?? "情報なし"
       ]
       result(dict)
     }
